@@ -3,35 +3,57 @@ import platform
 import psutil
 import cpuinfo
 import GPUtil
-import wmi
 import customtkinter as ctk
 import threading
 import time
+import subprocess
 from datetime import datetime
+
+# Guard Windows-specific imports
+if platform.system() == "Windows":
+    try:
+        import wmi
+    except ImportError:
+        wmi = None
+else:
+    wmi = None
 
 class SystemScanner:
     """
     فئة مسؤولة عن جمع كافة المعلومات الخاصة بالعتاد ونظام التشغيل.
     """
     def __init__(self):
+        self.system = platform.system()
         try:
-            self.w = wmi.WMI()
+            if self.system == "Windows" and wmi:
+                self.w = wmi.WMI()
+            else:
+                self.w = None
         except Exception:
             self.w = None
 
     def get_cpu_info(self):
         """جمع معلومات المعالج"""
-        info = cpuinfo.get_cpu_info()
-        return {
-            "الاسم": info.get('brand_raw', "غير معروف"),
-            "التردد": info.get('hz_actual_friendly', "غير معروف"),
-            "الأنوية الحقيقية": psutil.cpu_count(logical=False),
-            "الأنوية المنطقية": psutil.cpu_count(logical=True),
-            "المعمارية": info.get('arch', "غير معروف")
-        }
+        try:
+            info = cpuinfo.get_cpu_info()
+            return {
+                "الاسم": info.get('brand_raw', "غير معروف"),
+                "التردد": info.get('hz_actual_friendly', "غير معروف"),
+                "الأنوية الحقيقية": psutil.cpu_count(logical=False),
+                "الأنوية المنطقية": psutil.cpu_count(logical=True),
+                "المعمارية": info.get('arch', "غير معروف")
+            }
+        except Exception:
+            return {
+                "الاسم": "غير معروف",
+                "التردد": "غير معروف",
+                "الأنوية الحقيقية": psutil.cpu_count(logical=False),
+                "الأنوية المنطقية": psutil.cpu_count(logical=True),
+                "المعمارية": "غير معروف"
+            }
 
     def get_gpu_info(self):
-        """جمع معلومات كرت الشاشة (NVIDIA)"""
+        """جمع معلومات كرت الشاشة"""
         gpus_data = []
         try:
             gpus = GPUtil.getGPUs()
@@ -45,14 +67,18 @@ class SystemScanner:
         except Exception:
             pass
 
-        # محاولة جلب كروت شاشة أخرى عبر WMI في حال عدم وجود NVIDIA
-        if not gpus_data and self.w:
-            for video in self.w.Win32_VideoController():
-                gpus_data.append({
-                    "الاسم": video.Name,
-                    "الذاكرة الكلية": f"{int(video.AdapterRAM or 0) / (1024**2):.0f} MB" if video.AdapterRAM else "غير معروف",
-                    "الحالة": "متاح"
-                })
+        # محاولة جلب كروت شاشة أخرى في حال عدم وجود NVIDIA
+        if not gpus_data:
+            if self.system == "Windows" and self.w:
+                for video in self.w.Win32_VideoController():
+                    gpus_data.append({
+                        "الاسم": video.Name,
+                        "الذاكرة الكلية": f"{int(video.AdapterRAM or 0) / (1024**2):.0f} MB" if video.AdapterRAM else "غير معروف",
+                        "الحالة": "متاح"
+                    })
+            elif self.system == "Linux":
+                # Fallback for Linux - simplified
+                gpus_data.append({"الاسم": "جاري البحث في Linux...", "الحالة": "متاح"})
 
         return gpus_data if gpus_data else [{"الاسم": "لم يتم العثور على كرت شاشة متوافق"}]
 
@@ -66,93 +92,113 @@ class SystemScanner:
             "النسبة": f"{ram.percent}%"
         }
 
-
     def get_battery_info(self):
         """جمع معلومات البطارية وصحتها"""
         battery_data = {"حالة": "غير متوفرة"}
-        if not self.w:
-            return battery_data
 
-        try:
-            # استخدام namespace root\wmi للحصول على تفاصيل دقيقة
-            w_wmi = wmi.WMI(namespace="root\\wmi")
-            full_capacity = w_wmi.BatteryFullCapacity()[0].FullChargeCapacity
-            design_capacity = w_wmi.BatteryStaticData()[0].DesignedCapacity
-
-            # حساب مستوى التآكل
-            wear_level = 100 - (full_capacity / design_capacity * 100)
-
-            # جلب عدد الدورات (قد لا تتوفر في كل الأجهزة)
+        if self.system == "Windows" and self.w:
             try:
-                cycle_count = w_wmi.BatteryCycleCount()[0].CycleCount
-            except:
-                cycle_count = "غير مدعوم"
+                # استخدام namespace root\wmi للحصول على تفاصيل دقيقة
+                w_wmi = wmi.WMI(namespace="root\\wmi")
+                full_capacity = w_wmi.BatteryFullCapacity()[0].FullChargeCapacity
+                design_capacity = w_wmi.BatteryStaticData()[0].DesignedCapacity
 
-            battery_data = {
-                "السعة التصميمية": f"{design_capacity} mWh",
-                "السعة الحالية": f"{full_capacity} mWh",
-                "مستوى التآكل": f"{wear_level:.2f}%",
-                "عدد دورات الشحن": cycle_count,
-                "الحالة": "جيدة" if wear_level < 20 else "متوسطة"
-            }
-        except Exception:
-            # محاولة بسيطة في حال فشل الوصول لـ root\wmi
-            batt = psutil.sensors_battery()
-            if batt:
+                # حساب مستوى التآكل
+                wear_level = 100 - (full_capacity / design_capacity * 100)
+
+                # جلب عدد الدورات (قد لا تتوفر في كل الأجهزة)
+                try:
+                    cycle_count = w_wmi.BatteryCycleCount()[0].CycleCount
+                except:
+                    cycle_count = "غير مدعوم"
+
                 battery_data = {
-                    "النسبة المئوية": f"{batt.percent}%",
-                    "حالة الشحن": "يشحن" if batt.power_plugged else "تفريغ",
-                    "الوقت المتبقي": f"{batt.secsleft // 60} دقيقة" if batt.secsleft != -1 else "غير معروف"
+                    "السعة التصميمية": f"{design_capacity} mWh",
+                    "السعة الحالية": f"{full_capacity} mWh",
+                    "مستوى التآكل": f"{wear_level:.2f}%",
+                    "عدد دورات الشحن": cycle_count,
+                    "الحالة": "جيدة" if wear_level < 20 else "متوسطة"
                 }
+                return battery_data
+            except Exception:
+                pass
+
+        # Fallback for Linux or Windows failure
+        batt = psutil.sensors_battery()
+        if batt:
+            battery_data = {
+                "النسبة المئوية": f"{batt.percent}%",
+                "حالة الشحن": "يشحن" if batt.power_plugged else "تفريغ",
+                "الوقت المتبقي": f"{batt.secsleft // 60} دقيقة" if batt.secsleft != -1 and batt.secsleft is not None else "غير معروف"
+            }
         return battery_data
 
     def get_storage_info(self):
-        """جمع معلومات وحدات التخزين وصحتها (SMART)"""
+        """جمع معلومات وحدات التخزين وصحتها"""
         disks_info = []
-        if not self.w:
-            return disks_info
 
-        try:
-            for disk in self.w.Win32_DiskDrive():
-                # جلب الحالة الأساسية
-                status = disk.Status
-                size_gb = int(disk.Size) / (1024**3)
-
-                disks_info.append({
-                    "الموديل": disk.Model,
-                    "الحجم": f"{size_gb:.2f} GB",
-                    "النوع": "NVMe/SSD" if "SSD" in disk.Model or "NVMe" in disk.Model else "HDD",
-                    "الحالة الصحية": "سليم" if status == "OK" else "تحتاج فحص"
-                })
-
-            # محاولة جلب ساعات التشغيل عبر MSStorageDriver (تحتاج صلاحيات مسؤول)
+        if self.system == "Windows" and self.w:
             try:
-                w_wmi = wmi.WMI(namespace="root\\wmi")
-                # ملاحظة: جلب ساعات التشغيل بشكل دقيق يتطلب تحليل Byte array لـ SMART
-                # سنكتفي هنا بإظهار أن النظام يعمل على مراقبة الصحة
-            except:
+                for disk in self.w.Win32_DiskDrive():
+                    status = disk.Status
+                    size_gb = int(disk.Size) / (1024**3)
+                    disks_info.append({
+                        "الموديل": disk.Model,
+                        "الحجم": f"{size_gb:.2f} GB",
+                        "النوع": "NVMe/SSD" if "SSD" in disk.Model or "NVMe" in disk.Model else "HDD",
+                        "الحالة الصحية": "سليم" if status == "OK" else "تحتاج فحص"
+                    })
+                return disks_info
+            except Exception:
                 pass
+
+        # Fallback / Linux
+        try:
+            partitions = psutil.disk_partitions()
+            for partition in partitions:
+                if 'cdrom' in partition.opts or partition.fstype == '':
+                    continue
+                usage = psutil.disk_usage(partition.mountpoint)
+                disks_info.append({
+                    "الموديل": partition.device,
+                    "الحجم": f"{usage.total / (1024**3):.2f} GB",
+                    "النوع": "مجهول",
+                    "الحالة الصحية": "سليم (برمجياً)"
+                })
         except Exception:
             pass
 
         return disks_info
 
-
     def get_temperature_info(self):
         """جلب درجات الحرارة الحالية"""
         temps = {"CPU": "غير مدعوم", "GPU": "غير مدعوم"}
-        try:
-            # محاولة جلب حرارة المعالج عبر WMI (MSAcpi_ThermalZoneTemperature)
-            # النتيجة تكون بالعشر من الكلفن غالباً
-            if self.w:
+
+        if self.system == "Windows" and self.w:
+            try:
                 w_wmi = wmi.WMI(namespace="root\\wmi")
                 t = w_wmi.MSAcpi_ThermalZoneTemperature()[0].CurrentTemperature
                 temps["CPU"] = f"{(t / 10.0) - 273.15:.1f} °C"
-        except:
-            pass
+            except:
+                pass
+
+        # Linux thermal or PSUtil fallback
+        if temps["CPU"] == "غير مدعوم":
+            try:
+                ps_temps = psutil.sensors_temperatures()
+                if ps_temps:
+                    # Try to find common CPU thermal zones
+                    for name, entries in ps_temps.items():
+                        if name in ['coretemp', 'cpu_thermal', 'k10temp']:
+                            temps["CPU"] = f"{entries[0].current} °C"
+                            break
+                    if temps["CPU"] == "غير مدعوم":
+                        first_key = list(ps_temps.keys())[0]
+                        temps["CPU"] = f"{ps_temps[first_key][0].current} °C"
+            except:
+                pass
 
         try:
-            # حرارة كرت الشاشة من GPUtil
             gpus = GPUtil.getGPUs()
             if gpus:
                 temps["GPU"] = f"{gpus[0].temperature} °C"
@@ -285,14 +331,14 @@ class LaptopInspectorApp(ctk.CTk):
         gpus = self.scanner.get_gpu_info()
         gpu_text = ""
         for g in gpus:
-            gpu_text += f"الاسم: {g.get('الاسم')}\nالذاكرة: {g.get('الذاكرة الكلية')}\n---\n"
+            gpu_text += f"الاسم: {g.get('الاسم')}\nالذاكرة: {g.get('الذاكرة الكلية', 'N/A')}\n---\n"
         self.gpu_data_label.configure(text=gpu_text)
 
         # Storage
         disks = self.scanner.get_storage_info()
         self.storage_data_box.delete("1.0", "end")
         for d in disks:
-            self.storage_data_box.insert("end", f"الموديل: {d['الموديل']}\nالحجم: {d['الحجم']}\nالنوع: {d['النوع']}\nالحالة: {d['الحالة الصحية']}\n" + "="*30 + "\n")
+            self.storage_data_box.insert("end", f"الموديل: {d['الموديل']}\nالحجم: {d['الحجم']}\nالنوع: {d.get('النوع', 'N/A')}\nالحالة: {d.get('الحالة الصحية', 'N/A')}\n" + "="*30 + "\n")
 
         # Battery
         batt = self.scanner.get_battery_info()
@@ -349,7 +395,11 @@ class LaptopInspectorApp(ctk.CTk):
     def export_report(self):
         """تصدير تقرير شامل إلى سطح المكتب"""
         try:
-            report_path = os.path.join(os.path.expanduser("~"), "Desktop", "Laptop_Report_Arabic.txt")
+            desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+            if not os.path.exists(desktop):
+                desktop = os.path.expanduser("~")
+
+            report_path = os.path.join(desktop, "Laptop_Report_Arabic.txt")
 
             cpu = self.scanner.get_cpu_info()
             gpu = self.scanner.get_gpu_info()
@@ -367,7 +417,7 @@ class LaptopInspectorApp(ctk.CTk):
                 for k, v in cpu.items(): f.write(f"{k}: {v}\n")
 
                 f.write("\n[ كرت الشاشة ]\n")
-                for g in gpu: f.write(f"الاسم: {g.get('الاسم')}\nالذاكرة: {g.get('الذاكرة الكلية')}\n---\n")
+                for g in gpu: f.write(f"الاسم: {g.get('الاسم')}\nالذاكرة: {g.get('الذاكرة الكلية', 'N/A')}\n---\n")
 
                 f.write("\n[ الذاكرة العشوائية ]\n")
                 for k, v in ram.items(): f.write(f"{k}: {v}\n")
@@ -376,13 +426,13 @@ class LaptopInspectorApp(ctk.CTk):
                 for k, v in batt.items(): f.write(f"{k}: {v}\n")
 
                 f.write("\n[ وحدات التخزين ]\n")
-                for d in disks: f.write(f"الموديل: {d['الموديل']} | الحجم: {d['الحجم']} | الحالة: {d['الحالة الصحية']}\n")
+                for d in disks: f.write(f"الموديل: {d['الموديل']} | الحجم: {d['الحجم']} | الحالة: {d.get('الحالة الصحية', 'N/A')}\n")
 
                 f.write("\n" + "="*50 + "\n")
                 f.write("تم إنشاء هذا التقرير بواسطة أداة فحص اللابتوب الاحترافية\n")
 
             # عرض رسالة نجاح (مبسطة)
-            self.title_label.configure(text="تم تصدير التقرير إلى سطح المكتب بنجاح!", text_color="green")
+            self.title_label.configure(text=f"تم تصدير التقرير بنجاح!", text_color="green")
             self.after(3000, lambda: self.title_label.configure(text="أداة فحص الكمبيوتر الشاملة", text_color="white"))
         except Exception as e:
             print(f"Error exporting report: {e}")
