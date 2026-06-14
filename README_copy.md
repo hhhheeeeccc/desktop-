@@ -15,7 +15,7 @@
 يجب تثبيت لغة Python (إصدار 3.8 أو أحدث) ثم تثبيت المكتبات اللازمة عبر الأمر التالي:
 
 ```bash
-pip install customtkinter psutil wmi GPUtil py-cpuinfo pillow setuptools reportlab opencv-python speedtest-cli matplotlib
+pip install customtkinter psutil wmi GPUtil py-cpuinfo pillow setuptools
 ```
 
 ## 🚀 كيفية الاستخدام
@@ -32,27 +32,3 @@ pip install customtkinter psutil wmi GPUtil py-cpuinfo pillow setuptools reportl
 
 ---
 **تم التطوير بواسطة جولز (Jules)**
-## 📦 تحويل المشروع إلى تطبيق تنفيذي (Packaging)
-
-يمكنك تحويل هذا البرنامج إلى ملف `.exe` للويندوز أو تطبيق للينكس باستخدام `PyInstaller`.
-
-### 1. تثبيت PyInstaller
-```bash
-pip install pyinstaller
-```
-
-### 2. التغليف للويندوز (Windows)
-افتح الـ Terminal في مجلد المشروع وشغل الأمر التالي:
-```bash
-pyinstaller --noconsole --onefile --name "LaptopInspector" --add-data "path/to/customtkinter;customtkinter/" laptop_inspector.py
-```
-*   `--noconsole`: لإخفاء نافذة الأوامر عند تشغيل البرنامج.
-*   `--onefile`: لجمع كل الملفات في ملف واحد فقط.
-*   `--add-data`: ضروري لتضمين ملفات مكتبة `customtkinter`.
-
-### 3. التغليف للينكس (Linux)
-```bash
-pyinstaller --noconsole --onefile --name "LaptopInspector" laptop_inspector.py
-```
-
-ستجد الملف الناتج في مجلد باسم `dist`.
