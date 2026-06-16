@@ -14,6 +14,14 @@ sys.modules["cpuinfo"] = mock_cpuinfo
 mock_gputil = MagicMock()
 sys.modules["GPUtil"] = mock_gputil
 mock_psutil = MagicMock()
+mock_cv2 = MagicMock()
+sys.modules["cv2"] = mock_cv2
+mock_speedtest = MagicMock()
+sys.modules["speedtest"] = mock_speedtest
+mock_plt = MagicMock()
+sys.modules["matplotlib"] = mock_plt
+sys.modules["matplotlib.pyplot"] = mock_plt
+sys.modules["matplotlib.backends.backend_tkagg"] = mock_plt
 sys.modules["psutil"] = mock_psutil
 
 import unittest
